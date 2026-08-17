@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-500: #2563eb;
+  --color-brand-600: #1d4ed8;
+  --color-brand-700: #1e40af;
+  --color-brand-800: #1e3a8a;
+  --color-brand-900: #172554;
+
+  --color-surface-light: #f8fafc;
+  --color-surface-card: #ffffff;
+  --color-surface-border: #e2e8f0;
+
+  --input-height: 48px;
+  --input-padding-x: 16px;
+  --input-font-size: 15px;
+  --input-border-color: #cbd5e1;
+  --input-focus-border: #2563eb;
+  --input-bg: #ffffff;
+  --radius-input: 10px;
+  --radius-button: 10px;
+  --button-height-md: 46px;
+  --radius-card: 16px;
+  --card-shadow: 0 10px 30px -5px rgba(37, 99, 235, 0.08), 0 4px 12px -2px rgba(0, 0, 0, 0.03);
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  background-color: #f8fafc;
+  color: #1e293b;
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.custom-input {
+  height: var(--input-height);
+  padding-left: var(--input-padding-x);
+  padding-right: var(--input-padding-x);
+  font-size: var(--input-font-size);
+  background-color: var(--input-bg);
+  border: 1.5px solid var(--input-border-color);
+  border-radius: var(--radius-input);
+  width: 100%;
+  color: #1e293b;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.custom-input:focus {
+  border-color: var(--input-focus-border);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.custom-input::placeholder {
+  color: #94a3b8;
+}
+
+.card-aesthetic {
+  background: var(--color-surface-card);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-surface-border);
+  box-shadow: var(--card-shadow);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease forwards;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0.85;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-drawer-in {
+  animation: drawer-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}

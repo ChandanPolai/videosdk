@@ -1,0 +1,12 @@
+[project]
+name = "demo-videosdk"
+version = "0.1.0"
+description = "VideoSDK agent demo"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+  "zeroruntime",
+  "python-dotenv",
+  "mcp<2.0.0",
+  "httpx",
+]
