@@ -9,7 +9,7 @@ const readJson = async (response) => {
 };
 
 const apiUnavailable = () =>
-  new Error('Script API is not running. Start the Python agent first: uv run python src/main.py');
+  new Error('Script API is not running. In zrt-demo-agent run: uv run python script_api.py');
 
 export const fetchAgentScript = async () => {
   try {

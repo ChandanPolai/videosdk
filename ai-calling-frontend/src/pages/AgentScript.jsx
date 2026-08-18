@@ -23,13 +23,20 @@ const AgentScriptPage = () => {
   const loadScript = async () => {
     setLoading(true);
     try {
-      const data = await fetchAgentScript();
+      const [data, status] = await Promise.all([
+        fetchAgentScript(),
+        fetchDeployStatus().catch(() => null)
+      ]);
       setScript({
         agent_name: data.agent_name || 'Priya',
         company: data.company || 'Raaj Investment',
         opening_line: data.opening_line || '',
         instructions: data.instructions || ''
       });
+      if (status) {
+        setDeploy(status);
+        if (status.status === 'running') setPushing(true);
+      }
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -107,7 +114,7 @@ const AgentScriptPage = () => {
         <div>
           <h2 className="text-2xl font-extrabold text-slate-900">Agent Script</h2>
           <p className="text-sm text-slate-500">
-            Call start pe yeh opening line turant boli jaati hai. Save & Push VideoSDK cloud pe deploy karta hai.
+            Loads the live agent script. Save locally, or Save & Push to deploy on VideoSDK.
           </p>
         </div>
         <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadScript} disabled={loading}>
@@ -162,9 +169,12 @@ const AgentScriptPage = () => {
                 value={script.opening_line}
                 disabled={loading}
                 onChange={(e) => setScript((prev) => ({ ...prev, opening_line: e.target.value }))}
-                placeholder="Hello, kya main aapse baat kar rahi hoon?"
+                placeholder="Hello, kya main {name} ji se baat kar rahi hoon?"
                 required
               />
+              <p className="text-xs text-slate-400 mt-1.5">
+                Use <span className="font-semibold">{`{name}`}</span> — it is replaced with the participant name from the test call.
+              </p>
             </div>
 
             <div>
@@ -210,7 +220,7 @@ const AgentScriptPage = () => {
               ref={logRef}
               className="h-80 overflow-auto rounded-xl bg-slate-900 text-slate-100 text-[11px] leading-5 p-4"
             >
-              {(deploy?.log || []).join('\n') || 'Save & Push ke baad yahan logs dikhenge.'}
+              {(deploy?.log || []).join('\n') || 'Save & Push to VideoSDK to see deploy logs here.'}
             </pre>
           </div>
         </Card>

@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
+import DashboardPage from './pages/Dashboard';
 import CallsPage from './pages/Calls';
 import RoomsPage from './pages/Rooms';
 import SessionsPage from './pages/Sessions';
@@ -9,7 +10,7 @@ import TestCallPage from './pages/TestCall';
 import AgentScriptPage from './pages/AgentScript';
 
 const DashboardShell = () => {
-  const [activeTab, setActiveTab] = useState('test-call');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [recordingFocus, setRecordingFocus] = useState(null);
 
   const openRecordings = useCallback((focus) => {
@@ -23,6 +24,8 @@ const DashboardShell = () => {
 
   const renderView = () => {
     switch (activeTab) {
+      case 'dashboard':
+        return <DashboardPage onOpenCalls={() => setActiveTab('calls')} />;
       case 'test-call':
         return <TestCallPage />;
       case 'agent-script':
@@ -36,7 +39,7 @@ const DashboardShell = () => {
       case 'calls':
         return <CallsPage />;
       default:
-        return <TestCallPage />;
+        return <DashboardPage onOpenCalls={() => setActiveTab('calls')} />;
     }
   };
 
@@ -51,6 +54,7 @@ const App = () => (
   <BrowserRouter>
     <Routes>
       <Route path="/" element={<DashboardShell />} />
+      <Route path="/dashboard" element={<DashboardShell />} />
       <Route path="/test-call" element={<DashboardShell />} />
       <Route path="/agent-script" element={<DashboardShell />} />
       <Route path="/calls" element={<DashboardShell />} />

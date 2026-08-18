@@ -1,6 +1,7 @@
 import React from 'react';
 import Logo from '../ui/Logo';
 import {
+  LayoutDashboard,
   Phone,
   PhoneCall,
   DoorOpen,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 
 export const navItems = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'test-call', label: 'Test Call', icon: PhoneCall },
   { id: 'agent-script', label: 'Agent Script', icon: ScrollText },
   { id: 'calls', label: 'Call History', icon: Phone },

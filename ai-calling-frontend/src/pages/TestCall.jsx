@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { PhoneCall, Plus, Trash2, RefreshCw, Upload, FileSpreadsheet, X } from 'lucide-react';
+import { PhoneCall, RefreshCw, Upload, FileSpreadsheet, X, Download } from 'lucide-react';
 import { toast } from 'react-toastify';
 import {
   createSipCall,
@@ -7,15 +7,17 @@ import {
   fetchSipRoutingRules
 } from '../services/videosdkApi';
 import { COUNTRY_CODES, buildE164, getDialCode } from '../utils/countryCodes';
-import { guessPhoneColumn, parseSpreadsheetFile } from '../utils/parseSpreadsheet';
+import { parseSpreadsheetFile } from '../utils/parseSpreadsheet';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 
+const PREFERRED_FROM = '+912269980418';
+const PREFERRED_RULE = 'rr_vuzrma';
 const MAX_BULK_NUMBERS = 200;
-const CALL_GAP_MS = 500;
+const CALL_GAP_MS = 400;
 
-const emptyMetaRow = () => ({ id: `${Date.now()}-${Math.random()}`, key: '', value: '' });
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const normalizePhone = (value = '') => {
   const trimmed = String(value).trim().replace(/[\s()-]/g, '');
@@ -25,12 +27,11 @@ const normalizePhone = (value = '') => {
   return trimmed;
 };
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 const TestCallPage = () => {
   const fileInputRef = useRef(null);
   const [loadingSetup, setLoadingSetup] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [callingId, setCallingId] = useState('');
   const [phoneNumbers, setPhoneNumbers] = useState([]);
   const [routingRules, setRoutingRules] = useState([]);
 
@@ -38,18 +39,16 @@ const TestCallPage = () => {
   const [routingRuleId, setRoutingRuleId] = useState('');
   const [countryCode, setCountryCode] = useState('IN');
   const [localNumber, setLocalNumber] = useState('');
-  const [participantName, setParticipantName] = useState('Test Caller');
-  const [recordAudio, setRecordAudio] = useState(true);
-  const [waitUntilAnswered, setWaitUntilAnswered] = useState(false);
-  const [ringingTimeout, setRingingTimeout] = useState(30);
-  const [metaRows, setMetaRows] = useState([emptyMetaRow()]);
+  const [participantName, setParticipantName] = useState('');
   const [lastResult, setLastResult] = useState(null);
 
   const [entryMode, setEntryMode] = useState('single');
   const [spreadsheet, setSpreadsheet] = useState(null);
   const [phoneColumn, setPhoneColumn] = useState('');
+  const [nameColumn, setNameColumn] = useState('');
   const [parsingFile, setParsingFile] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(null);
+  const cancelBulkRef = useRef(false);
 
   const activeOutboundNumbers = useMemo(
     () =>
@@ -72,7 +71,7 @@ const TestCallPage = () => {
     [outboundRules, routingRuleId]
   );
 
-  const mappedNumbers = useMemo(() => {
+  const mappedContacts = useMemo(() => {
     if (!spreadsheet || !phoneColumn) return [];
 
     const seen = new Set();
@@ -89,12 +88,13 @@ const TestCallPage = () => {
         id: `${index}-${e164}`,
         row: index + 2,
         raw,
-        e164
+        e164,
+        name: nameColumn ? String(row[nameColumn] || '').trim() : ''
       });
     });
 
     return items;
-  }, [spreadsheet, phoneColumn, countryCode]);
+  }, [spreadsheet, phoneColumn, nameColumn, countryCode]);
 
   const loadSetup = async () => {
     setLoadingSetup(true);
@@ -109,13 +109,15 @@ const TestCallPage = () => {
       setPhoneNumbers(numbers);
       setRoutingRules(rules);
 
+      const preferredFrom = numbers.find((item) => item?.phoneNumber?.e164 === PREFERRED_FROM);
       const firstActive = numbers.find(
         (item) => item?.phoneNumber?.status === 'ACTIVE' && item?.outbound?.id
       );
+      const preferredRule = rules.find((rule) => rule.id === PREFERRED_RULE);
       const firstOutboundRule = rules.find((rule) => String(rule.type).toLowerCase() === 'outbound');
 
-      setSipCallFrom((prev) => prev || firstActive?.phoneNumber?.e164 || '');
-      setRoutingRuleId((prev) => prev || firstOutboundRule?.id || '');
+      setSipCallFrom((prev) => prev || preferredFrom?.phoneNumber?.e164 || firstActive?.phoneNumber?.e164 || '');
+      setRoutingRuleId((prev) => prev || preferredRule?.id || firstOutboundRule?.id || '');
     } catch (err) {
       toast.error(err.message || 'Failed to load call setup');
     } finally {
@@ -127,29 +129,117 @@ const TestCallPage = () => {
     loadSetup();
   }, []);
 
-  const updateMetaRow = (id, field, value) => {
-    setMetaRows((rows) => rows.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
-  };
-
-  const removeMetaRow = (id) => {
-    setMetaRows((rows) => (rows.length <= 1 ? [emptyMetaRow()] : rows.filter((row) => row.id !== id)));
-  };
-
-  const buildMetadata = () => {
-    const metadata = {};
-    metaRows.forEach((row) => {
-      const key = row.key.trim();
-      if (!key) return;
-      metadata[key] = row.value;
-    });
-    return metadata;
-  };
-
   const clearSpreadsheet = () => {
+    cancelBulkRef.current = true;
     setSpreadsheet(null);
     setPhoneColumn('');
+    setNameColumn('');
     setBulkProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const startBulkCalls = async (contacts) => {
+    const from = normalizePhone(sipCallFrom);
+    if (!from) {
+      toast.error('Please select a caller ID number');
+      return;
+    }
+    if (!routingRuleId) {
+      toast.error('Please select an outbound routing rule');
+      return;
+    }
+
+    const ready = contacts
+      .filter((item) => item.e164)
+      .slice(0, MAX_BULK_NUMBERS)
+      .map((item) => ({
+        ...item,
+        name: item.name || 'Customer',
+        status: 'queued',
+        message: ''
+      }));
+
+    if (!ready.length) {
+      toast.error('No valid numbers found in the Excel file');
+      return;
+    }
+
+    if (contacts.length > MAX_BULK_NUMBERS) {
+      toast.warn(`Only the first ${MAX_BULK_NUMBERS} numbers will be called`);
+    }
+
+    cancelBulkRef.current = false;
+    setSubmitting(true);
+    setLastResult(null);
+    setBulkProgress({ total: ready.length, done: 0, results: ready });
+
+    let successCount = 0;
+    let failCount = 0;
+    let lastSuccess = null;
+
+    for (let i = 0; i < ready.length; i += 1) {
+      if (cancelBulkRef.current) break;
+
+      const item = ready[i];
+      setCallingId(item.id);
+      setBulkProgress((prev) => ({
+        ...prev,
+        results: prev.results.map((row, idx) => (idx === i ? { ...row, status: 'calling' } : row))
+      }));
+
+      try {
+        const res = await createSipCall({
+          sipCallFrom: from,
+          sipCallTo: item.e164,
+          routingRuleId,
+          metadata: { name: item.name }
+        });
+        successCount += 1;
+        lastSuccess = { ...res, participantName: item.name };
+        setBulkProgress((prev) => ({
+          ...prev,
+          done: i + 1,
+          results: prev.results.map((row, idx) =>
+            idx === i
+              ? {
+                  ...row,
+                  status: 'success',
+                  message: res.message || 'Call initiated',
+                  callId: res.data?.callId || ''
+                }
+              : row
+          )
+        }));
+      } catch (err) {
+        failCount += 1;
+        setBulkProgress((prev) => ({
+          ...prev,
+          done: i + 1,
+          results: prev.results.map((row, idx) =>
+            idx === i ? { ...row, status: 'failed', message: err.message || 'Failed to place call' } : row
+          )
+        }));
+      }
+
+      if (i < ready.length - 1 && !cancelBulkRef.current) {
+        await wait(CALL_GAP_MS);
+      }
+    }
+
+    if (lastSuccess) setLastResult(lastSuccess);
+
+    if (cancelBulkRef.current) {
+      toast.warn('Calling stopped');
+    } else if (failCount === 0) {
+      toast.success(`Calls started for all ${successCount} numbers`);
+    } else if (successCount === 0) {
+      toast.error(`All ${failCount} calls failed`);
+    } else {
+      toast.warn(`${successCount} calls started, ${failCount} failed`);
+    }
+
+    setSubmitting(false);
+    setCallingId('');
   };
 
   const handleExcelUpload = async (event) => {
@@ -158,40 +248,47 @@ const TestCallPage = () => {
 
     setParsingFile(true);
     setBulkProgress(null);
+    let parsedOk = false;
     try {
       const parsed = await parseSpreadsheetFile(file);
       if (!parsed.headers.length) {
         throw new Error('No columns found in the Excel file');
       }
+
+      const phoneCol = parsed.phoneColumn || '';
+      const nameCol = parsed.nameColumn || '';
       setSpreadsheet(parsed);
-      setPhoneColumn(guessPhoneColumn(parsed.headers));
-      toast.success(`Loaded ${parsed.fileName}. Map the mobile number column to continue.`);
+      setPhoneColumn(phoneCol);
+      setNameColumn(nameCol);
+      parsedOk = true;
+
+      const seen = new Set();
+      const contacts = [];
+      parsed.rows.forEach((row, index) => {
+        const raw = row[phoneCol];
+        const e164 = buildE164(countryCode, raw);
+        const digits = e164.replace(/\D/g, '');
+        if (digits.length < 8 || seen.has(e164)) return;
+        seen.add(e164);
+        contacts.push({
+          id: `${index}-${e164}`,
+          row: index + 2,
+          raw,
+          e164,
+          name: nameCol ? String(row[nameCol] || '').trim() : ''
+        });
+      });
+
+      toast.success(`Loaded ${contacts.length} contacts. Starting calls automatically…`);
+      setParsingFile(false);
+      await startBulkCalls(contacts);
     } catch (err) {
-      clearSpreadsheet();
+      if (!parsedOk) clearSpreadsheet();
       toast.error(err.message || 'Failed to read Excel file');
     } finally {
       setParsingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  };
-
-  const buildCallPayload = (to) => {
-    const from = normalizePhone(sipCallFrom);
-    const selectedNumber = activeOutboundNumbers.find((item) => item.phoneNumber?.e164 === from);
-    const metadata = buildMetadata();
-
-    return {
-      sipCallFrom: from,
-      sipCallTo: to,
-      routingRuleId,
-      gatewayId: selectedNumber?.outbound?.id || undefined,
-      participant: {
-        name: participantName.trim() || 'Test Caller'
-      },
-      recordAudio,
-      waitUntilAnswered,
-      ringingTimeout: Number(ringingTimeout) || 30,
-      ...(Object.keys(metadata).length ? { metadata } : {})
-    };
   };
 
   const validateSetup = () => {
@@ -207,133 +304,46 @@ const TestCallPage = () => {
     return true;
   };
 
-  const placeSingleCall = async () => {
-    const to = buildE164(countryCode, localNumber);
-    if (!to || localNumber.trim().length < 6) {
+  const placeCall = async ({ to, name, rowId }) => {
+    if (!validateSetup()) return;
+
+    const customerName = String(name || '').trim();
+    if (!customerName) {
+      toast.error('Please enter the participant name');
+      return;
+    }
+    if (!to) {
       toast.error('Please enter a valid destination phone number');
       return;
     }
 
     setSubmitting(true);
+    setCallingId(rowId || 'single');
     try {
-      const res = await createSipCall(buildCallPayload(to));
-      setLastResult(res);
-      toast.success(res.message || 'Test call initiated successfully');
+      const res = await createSipCall({
+        sipCallFrom: normalizePhone(sipCallFrom),
+        sipCallTo: to,
+        routingRuleId,
+        metadata: { name: customerName }
+      });
+      setLastResult({ ...res, participantName: customerName });
+      toast.success(res.message || `Call started for ${customerName}`);
     } catch (err) {
       toast.error(err.message || 'Failed to place test call');
     } finally {
       setSubmitting(false);
+      setCallingId('');
     }
   };
 
-  const placeBulkCalls = async () => {
-    if (!spreadsheet) {
-      toast.error('Please upload an Excel file');
-      return;
-    }
-    if (!phoneColumn) {
-      toast.error('Please map the mobile number column');
-      return;
-    }
-    if (!mappedNumbers.length) {
-      toast.error('No valid mobile numbers found in the mapped column');
-      return;
-    }
-
-    const numbers = mappedNumbers.slice(0, MAX_BULK_NUMBERS);
-    if (mappedNumbers.length > MAX_BULK_NUMBERS) {
-      toast.warn(`Only the first ${MAX_BULK_NUMBERS} unique numbers will be called`);
-    }
-
-    setSubmitting(true);
-    setLastResult(null);
-    setBulkProgress({
-      total: numbers.length,
-      done: 0,
-      results: numbers.map((item) => ({ ...item, status: 'queued', message: '' }))
-    });
-
-    let successCount = 0;
-    let failCount = 0;
-    let lastSuccess = null;
-
-    for (let i = 0; i < numbers.length; i += 1) {
-      const item = numbers[i];
-
-      setBulkProgress((prev) => ({
-        ...prev,
-        results: prev.results.map((row, idx) =>
-          idx === i ? { ...row, status: 'calling' } : row
-        )
-      }));
-
-      try {
-        const res = await createSipCall(buildCallPayload(item.e164));
-        successCount += 1;
-        lastSuccess = res;
-        setBulkProgress((prev) => ({
-          ...prev,
-          done: i + 1,
-          results: prev.results.map((row, idx) =>
-            idx === i
-              ? {
-                  ...row,
-                  status: 'success',
-                  message: res.message || 'Call initiated',
-                  callId: res.data?.callId || '',
-                  roomId: res.data?.roomId || ''
-                }
-              : row
-          )
-        }));
-      } catch (err) {
-        failCount += 1;
-        setBulkProgress((prev) => ({
-          ...prev,
-          done: i + 1,
-          results: prev.results.map((row, idx) =>
-            idx === i
-              ? { ...row, status: 'failed', message: err.message || 'Failed to place call' }
-              : row
-          )
-        }));
-      }
-
-      if (i < numbers.length - 1) {
-        await wait(CALL_GAP_MS);
-      }
-    }
-
-    if (lastSuccess) setLastResult(lastSuccess);
-
-    if (failCount === 0) {
-      toast.success(`Test calls placed for all ${successCount} numbers`);
-    } else if (successCount === 0) {
-      toast.error(`All ${failCount} test calls failed`);
-    } else {
-      toast.warn(`${successCount} calls placed, ${failCount} failed`);
-    }
-
-    setSubmitting(false);
-  };
-
-  const placeTestCall = async (e) => {
+  const placeSingleCall = async (e) => {
     e.preventDefault();
-    if (!validateSetup()) return;
-
-    if (entryMode === 'excel') {
-      await placeBulkCalls();
+    const to = buildE164(countryCode, localNumber);
+    if (!to || localNumber.trim().length < 6) {
+      toast.error('Please enter a valid destination phone number');
       return;
     }
-
-    await placeSingleCall();
-  };
-
-  const resultBadge = (status) => {
-    if (status === 'success') return <Badge variant="success">Success</Badge>;
-    if (status === 'failed') return <Badge variant="danger">Failed</Badge>;
-    if (status === 'calling') return <Badge variant="warning">Calling…</Badge>;
-    return <Badge variant="info">Queued</Badge>;
+    await placeCall({ to, name: participantName });
   };
 
   return (
@@ -342,7 +352,7 @@ const TestCallPage = () => {
         <div>
           <h2 className="text-2xl font-extrabold text-slate-900">Test Call</h2>
           <p className="text-sm text-slate-500">
-            Place a single test call, or upload Excel and map the mobile column to call each number
+            Single number, or upload Excel — every contact is called automatically with their name.
           </p>
         </div>
         <Button size="sm" variant="secondary" icon={RefreshCw} onClick={loadSetup} disabled={loadingSetup}>
@@ -351,8 +361,8 @@ const TestCallPage = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <Card className="xl:col-span-2" title="Get a Test Call" subtitle="Choose caller ID, routing rule, and destination numbers">
-          <form onSubmit={placeTestCall} className="space-y-5">
+        <Card className="xl:col-span-2" title="Get a Test Call" subtitle="Caller ID, routing rule, name, and destination">
+          <form onSubmit={placeSingleCall} className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
@@ -406,22 +416,25 @@ const TestCallPage = () => {
                 />
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Participant Name
-                </label>
-                <input
-                  className="custom-input text-sm"
-                  value={participantName}
-                  onChange={(e) => setParticipantName(e.target.value)}
-                  placeholder="Test Caller"
-                />
-              </div>
+              {entryMode === 'single' && (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                    Participant Name *
+                  </label>
+                  <input
+                    className="custom-input text-sm"
+                    value={participantName}
+                    onChange={(e) => setParticipantName(e.target.value)}
+                    placeholder="Indu"
+                    required={entryMode === 'single'}
+                  />
+                </div>
+              )}
             </div>
 
             <div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-                Destination numbers *
+                Destination *
               </p>
               <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 mb-4">
                 <button
@@ -466,7 +479,7 @@ const TestCallPage = () => {
                         className="custom-input text-sm font-semibold !pl-14"
                         value={localNumber}
                         onChange={(e) => setLocalNumber(e.target.value.replace(/[^\d\s-]/g, ''))}
-                        placeholder="8347325704"
+                        placeholder="9535051051"
                         inputMode="tel"
                         required={entryMode === 'single'}
                       />
@@ -494,7 +507,7 @@ const TestCallPage = () => {
                       ))}
                     </select>
                     <p className="text-xs text-slate-500 self-center">
-                      Used when Excel numbers do not already include a country code
+                      Upload Excel and every contact is called automatically. No extra clicks.
                     </p>
                   </div>
 
@@ -516,77 +529,94 @@ const TestCallPage = () => {
                     >
                       {parsingFile ? 'Reading file…' : 'Upload Excel'}
                     </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      icon={Download}
+                      onClick={() => {
+                        const link = document.createElement('a');
+                        link.href = '/demo-test-call.xlsx';
+                        link.download = 'demo-test-call.xlsx';
+                        link.click();
+                      }}
+                    >
+                      Download demo Excel
+                    </Button>
                     {spreadsheet && (
                       <Button type="button" variant="ghost" icon={X} onClick={clearSpreadsheet}>
                         Clear file
                       </Button>
                     )}
                   </div>
+                  <p className="text-xs text-slate-400">
+                    Header names can be anything. Only name and number are used. Calls start as soon as the file is uploaded.
+                  </p>
 
                   {spreadsheet && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-                      <div className="flex items-start gap-2">
-                        <FileSpreadsheet className="w-4 h-4 mt-0.5 text-brand-600" />
-                        <div>
-                          <p className="text-sm font-semibold text-slate-800">{spreadsheet.fileName}</p>
-                          <p className="text-xs text-slate-500">
-                            Sheet: {spreadsheet.sheetName} · {spreadsheet.headers.length} columns ·{' '}
-                            {spreadsheet.rows.length} rows
-                          </p>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                          Mobile number column *
-                        </label>
-                        <select
-                          className="custom-input text-sm font-semibold bg-white"
-                          value={phoneColumn}
-                          onChange={(e) => setPhoneColumn(e.target.value)}
-                          required={entryMode === 'excel'}
-                        >
-                          <option value="">Select the phone column</option>
-                          {spreadsheet.headers.map((header) => (
-                            <option key={header} value={header}>
-                              {header}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="text-xs text-slate-400 mt-1.5">
-                          Extra Excel fields are ignored. Only this mapped column is used.
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs font-semibold text-slate-600 mb-2">
-                          {mappedNumbers.length} unique valid number
-                          {mappedNumbers.length === 1 ? '' : 's'} ready
-                          {mappedNumbers.length > MAX_BULK_NUMBERS
-                            ? ` (first ${MAX_BULK_NUMBERS} will be called)`
-                            : ''}
-                        </p>
-                        <div className="max-h-40 overflow-auto rounded-lg border border-slate-200 bg-white">
-                          {mappedNumbers.length === 0 ? (
-                            <p className="text-xs text-slate-400 p-3">
-                              No valid numbers in this column. Map a different field.
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <FileSpreadsheet className="w-4 h-4 mt-0.5 text-brand-600" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-800 truncate">{spreadsheet.fileName}</p>
+                            <p className="text-xs text-slate-500">
+                              {bulkProgress
+                                ? `Calling ${bulkProgress.done}/${bulkProgress.total}`
+                                : `${mappedContacts.length} contacts loaded`}
                             </p>
-                          ) : (
-                            mappedNumbers.slice(0, 50).map((item) => (
-                              <div
-                                key={item.id}
-                                className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-100 last:border-b-0"
-                              >
-                                <span className="text-xs font-semibold text-slate-800">{item.e164}</span>
-                                <span className="text-[11px] text-slate-400">Row {item.row}</span>
-                              </div>
-                            ))
-                          )}
+                          </div>
                         </div>
-                        {mappedNumbers.length > 50 && (
-                          <p className="text-[11px] text-slate-400 mt-1">
-                            Showing first 50 of {mappedNumbers.length}
+                        {submitting && entryMode === 'excel' && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              cancelBulkRef.current = true;
+                            }}
+                          >
+                            Stop
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white">
+                        {(bulkProgress?.results || mappedContacts).length === 0 ? (
+                          <p className="text-xs text-slate-400 p-3">
+                            No valid name and number pairs found in this file.
                           </p>
+                        ) : (
+                          (bulkProgress?.results || mappedContacts).map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-100 last:border-b-0"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-slate-800 truncate">
+                                  {item.name || 'No name'}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {item.e164} · Row {item.row}
+                                  {item.message ? ` · ${item.message}` : ''}
+                                </p>
+                              </div>
+                              {item.status ? (
+                                item.status === 'success' ? (
+                                  <Badge variant="success">Called</Badge>
+                                ) : item.status === 'failed' ? (
+                                  <Badge variant="danger">Failed</Badge>
+                                ) : item.status === 'calling' ? (
+                                  <Badge variant="warning">Calling…</Badge>
+                                ) : (
+                                  <Badge variant="info">Queued</Badge>
+                                )
+                              ) : callingId === item.id ? (
+                                <Badge variant="warning">Calling…</Badge>
+                              ) : (
+                                <Badge variant="info">Ready</Badge>
+                              )}
+                            </div>
+                          ))
                         )}
                       </div>
                     </div>
@@ -595,91 +625,13 @@ const TestCallPage = () => {
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <label className="flex items-center gap-2 p-3 rounded-xl border border-slate-100 bg-slate-50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={recordAudio}
-                  onChange={(e) => setRecordAudio(e.target.checked)}
-                  className="rounded border-slate-300"
-                />
-                <span className="text-sm font-semibold text-slate-700">Record audio</span>
-              </label>
-              <label className="flex items-center gap-2 p-3 rounded-xl border border-slate-100 bg-slate-50 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={waitUntilAnswered}
-                  onChange={(e) => setWaitUntilAnswered(e.target.checked)}
-                  className="rounded border-slate-300"
-                />
-                <span className="text-sm font-semibold text-slate-700">Wait until answered</span>
-              </label>
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Ringing timeout (sec)
-                </label>
-                <input
-                  type="number"
-                  min={5}
-                  max={120}
-                  className="custom-input text-sm"
-                  value={ringingTimeout}
-                  onChange={(e) => setRingingTimeout(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Metadata</p>
-                  <p className="text-xs text-slate-400">Optional key–value pairs for routing or tracking</p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  icon={Plus}
-                  onClick={() => setMetaRows((rows) => [...rows, emptyMetaRow()])}
-                >
-                  Add
+            {entryMode === 'single' && (
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <Button type="submit" icon={PhoneCall} disabled={submitting || loadingSetup} className="sm:min-w-[220px]">
+                  {submitting ? 'Placing call…' : 'Place Test Call'}
                 </Button>
               </div>
-
-              <div className="space-y-2">
-                {metaRows.map((row) => (
-                  <div key={row.id} className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      className="custom-input text-sm"
-                      placeholder="Key (e.g. campaignId)"
-                      value={row.key}
-                      onChange={(e) => updateMetaRow(row.id, 'key', e.target.value)}
-                    />
-                    <input
-                      className="custom-input text-sm"
-                      placeholder="Value"
-                      value={row.value}
-                      onChange={(e) => updateMetaRow(row.id, 'value', e.target.value)}
-                    />
-                    <Button type="button" size="sm" variant="ghost" icon={Trash2} onClick={() => removeMetaRow(row.id)}>
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-              <Button type="submit" icon={PhoneCall} disabled={submitting || loadingSetup} className="sm:min-w-[220px]">
-                {submitting
-                  ? entryMode === 'excel'
-                    ? `Placing calls… ${bulkProgress?.done || 0}/${bulkProgress?.total || 0}`
-                    : 'Placing call…'
-                  : entryMode === 'excel'
-                    ? `Place Test Calls${mappedNumbers.length ? ` (${Math.min(mappedNumbers.length, MAX_BULK_NUMBERS)})` : ''}`
-                    : 'Place Test Call'}
-              </Button>
-            </div>
+            )}
           </form>
         </Card>
 
@@ -717,17 +669,32 @@ const TestCallPage = () => {
                 <p className="text-sm text-slate-600">
                   {bulkProgress.done}/{bulkProgress.total} numbers processed
                 </p>
+                <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full bg-brand-500"
+                    style={{
+                      width: `${bulkProgress.total ? Math.round((bulkProgress.done / bulkProgress.total) * 100) : 0}%`
+                    }}
+                  />
+                </div>
                 <div className="max-h-72 overflow-auto space-y-2">
                   {bulkProgress.results.map((row) => (
                     <div key={row.id} className="p-3 rounded-xl bg-slate-50 border border-slate-100 space-y-1">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-slate-800">{row.e164}</span>
-                        {resultBadge(row.status)}
+                        <span className="text-xs font-semibold text-slate-800 truncate">
+                          {row.name} · {row.e164}
+                        </span>
+                        {row.status === 'success' ? (
+                          <Badge variant="success">Called</Badge>
+                        ) : row.status === 'failed' ? (
+                          <Badge variant="danger">Failed</Badge>
+                        ) : row.status === 'calling' ? (
+                          <Badge variant="warning">Calling…</Badge>
+                        ) : (
+                          <Badge variant="info">Queued</Badge>
+                        )}
                       </div>
                       {row.message && <p className="text-[11px] text-slate-500">{row.message}</p>}
-                      {row.callId && (
-                        <p className="text-[11px] font-mono text-slate-400">Call ID {row.callId}</p>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -738,6 +705,10 @@ const TestCallPage = () => {
               <div className="space-y-3">
                 <p className="text-sm text-slate-600">{lastResult.message || 'Call initiated'}</p>
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-slate-500">Name</span>
+                    <span className="text-xs font-semibold text-slate-800">{lastResult.participantName || '—'}</span>
+                  </div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-slate-500">Call ID</span>
                     <span className="text-xs font-mono text-slate-800">{lastResult.data?.callId || '—'}</span>

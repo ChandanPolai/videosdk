@@ -12,12 +12,66 @@ const PHONE_HEADER_PATTERNS = [
   /num/i
 ];
 
+const NAME_HEADER_PATTERNS = [
+  /full\s*name/i,
+  /client\s*name/i,
+  /customer\s*name/i,
+  /participant/i,
+  /^name$/i,
+  /\bnaam\b/i,
+  /first\s*name/i,
+  /^client$/i,
+  /^customer$/i
+];
+
 const cellToText = (value) => {
   if (value == null || value === '') return '';
   if (typeof value === 'number' && Number.isFinite(value)) {
     return String(Math.round(value));
   }
   return String(value).trim();
+};
+
+const looksLikePhone = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 8 && digits.length <= 15;
+};
+
+const looksLikeName = (value) => {
+  const text = String(value || '').trim();
+  if (!text || looksLikePhone(text)) return false;
+  return /[A-Za-z\u0900-\u097F]/.test(text);
+};
+
+export const detectNameAndPhoneColumns = (headers = [], rows = []) => {
+  const sample = rows.slice(0, 80);
+
+  const phoneRank = headers.map((header) => {
+    const headerBonus = PHONE_HEADER_PATTERNS.some((pattern) => pattern.test(String(header))) ? 3 : 0;
+    const valueScore = sample.filter((row) => looksLikePhone(row[header])).length;
+    return { header, score: valueScore + headerBonus };
+  });
+  phoneRank.sort((a, b) => b.score - a.score);
+
+  const phoneColumn =
+    phoneRank.find((item) => item.score > 0)?.header || headers[1] || headers[0] || '';
+
+  const nameRank = headers
+    .filter((header) => header !== phoneColumn)
+    .map((header) => {
+      const headerBonus = NAME_HEADER_PATTERNS.some((pattern) => pattern.test(String(header))) ? 3 : 0;
+      const valueScore = sample.filter((row) => looksLikeName(row[header])).length;
+      return { header, score: valueScore + headerBonus };
+    });
+  nameRank.sort((a, b) => b.score - a.score);
+
+  const nameColumn =
+    nameRank.find((item) => item.score > 0)?.header ||
+    headers.find((header) => header !== phoneColumn) ||
+    headers[0] ||
+    '';
+
+  return { nameColumn, phoneColumn };
 };
 
 export const parseSpreadsheetFile = (file) =>
@@ -59,11 +113,15 @@ export const parseSpreadsheetFile = (file) =>
           return record;
         });
 
+        const { nameColumn, phoneColumn } = detectNameAndPhoneColumns(headerRow, rows);
+
         resolve({
           sheetName,
           headers: headerRow,
           rows,
-          fileName: file.name
+          fileName: file.name,
+          nameColumn,
+          phoneColumn
         });
       } catch (err) {
         reject(err instanceof Error ? err : new Error('Failed to parse Excel file'));
@@ -73,11 +131,3 @@ export const parseSpreadsheetFile = (file) =>
     reader.onerror = () => reject(new Error('Failed to read file'));
     reader.readAsArrayBuffer(file);
   });
-
-export const guessPhoneColumn = (headers = []) => {
-  for (const pattern of PHONE_HEADER_PATTERNS) {
-    const match = headers.find((header) => pattern.test(String(header)));
-    if (match) return match;
-  }
-  return headers[0] || '';
-};

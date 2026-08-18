@@ -1,9 +1,11 @@
 import asyncio
+import json
 import logging
 import os
+from pathlib import Path
 
 import zeroruntime
-from zeroruntime import Agent, AgentContext, EOUConfig, InterruptConfig, Pipeline, Room, function_tool
+from zeroruntime import Agent, AgentContext, EOUConfig, Pipeline, Room, function_tool
 from zeroruntime.inference import TurnDetector, GoogleLLM, DeepgramSTT, CartesiaTTS
 from zeroruntime.plugins import SileroVAD
 from dotenv import load_dotenv
@@ -15,12 +17,42 @@ load_dotenv(override=True)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 AGENT_ID = os.getenv("AGENT_ID", "ag_zzq3b1")
+SCRIPT_PATH = Path(__file__).with_name("script.json")
+DEFAULT_OPENING = "Hello, kya main {name} ji se baat kar rahi hoon?"
 
 logging.basicConfig(
     level=LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
+
+
+def load_script() -> dict:
+    if SCRIPT_PATH.exists():
+        try:
+            data = json.loads(SCRIPT_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            logging.exception("Failed to read script.json")
+    return {}
+
+
+def resolve_customer_name(meta: dict) -> str:
+    for key in ("name", "participantName", "customerName", "clientName"):
+        value = meta.get(key)
+        if value and str(value).strip():
+            return str(value).strip()
+    return "Sovan"
+
+
+def render_opening(template: str, name: str) -> str:
+    line = template or DEFAULT_OPENING
+    return (
+        line.replace("{name}", name)
+        .replace("[Client Name]", name)
+        .replace("[client name]", name)
+    )
 
 
 def build_pipeline() -> Pipeline:
@@ -47,22 +79,31 @@ def build_pipeline() -> Pipeline:
 class VoiceAgent(Agent):
     def __init__(self, ctx: AgentContext) -> None:
         meta = dict(ctx.metadata) if ctx.metadata else {}
-        customer_name = meta.get("name") or "Sovan"
+        script = load_script()
+        customer_name = resolve_customer_name(meta)
+        instructions = (INSTRUCTIONS or "").replace("[Client Name]", customer_name)
+        agent_name = (script.get("agent_name") or "Priya").strip()
+        company = (script.get("company") or "Raaj Investment").strip()
+        instructions = (
+            f"Your name is {agent_name} from {company}. "
+            f"The person you are calling is {customer_name}. Always address them as {customer_name} ji.\n\n"
+            + instructions
+        )
+
         super().__init__(
             agent_id=AGENT_ID,
-            instructions=INSTRUCTIONS,
+            instructions=instructions,
             pipeline=build_pipeline(),
         )
 
         self.customer_info = {"name": customer_name}
         self.call_metadata = meta
-        self._history = None 
+        self.opening_line = render_opening(script.get("opening_line") or DEFAULT_OPENING, customer_name)
+        self._history = None
 
     async def on_enter(self) -> None:
-        await self.session.say(
-            f"Hello, kya main {self.customer_info['name']} ji se baat kar rahi hoon?"
-        )
- 
+        await self.session.say(self.opening_line)
+
     @function_tool
     async def end_call(self, message: str) -> dict:
         """End the call when the complaint is registered, or the caller asks to hang up / says goodbye.

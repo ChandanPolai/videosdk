@@ -61,7 +61,7 @@ WORKDIR /app
 
 COPY --from=builder --chown=appuser:appuser /opt/venv /opt/venv
 
-COPY --chown=appuser:appuser main.py instruction.py /app/
+COPY --chown=appuser:appuser main.py instruction.py instructions.md script.json /app/
 
 RUN mkdir -p /var/log/agent \
     && chown -R appuser:appuser /var/log/agent
