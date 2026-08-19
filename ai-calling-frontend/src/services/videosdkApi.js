@@ -1,4 +1,13 @@
-const API_BASE = import.meta.env.VITE_VIDEOSDK_API_BASE || '/videosdk-api';
+const configuredBase = String(import.meta.env.VITE_VIDEOSDK_API_BASE || '').replace(/\/$/, '');
+const isAbsoluteBase = /^https?:\/\//i.test(configuredBase);
+
+// Vite proxy (`/videosdk-api`) only exists in local `npm run dev`.
+// Production builds must call VideoSDK directly, otherwise the live host 404s.
+const API_BASE = import.meta.env.DEV
+  ? configuredBase || '/videosdk-api'
+  : isAbsoluteBase
+    ? configuredBase
+    : 'https://api.videosdk.live';
 const TOKEN = import.meta.env.VITE_VIDEOSDK_TOKEN || '';
 
 const buildQuery = (params = {}) => {

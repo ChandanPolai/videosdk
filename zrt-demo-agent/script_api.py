@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -20,6 +21,11 @@ from urllib.parse import urlparse
 AGENT_DIR = Path(__file__).resolve().parent
 SCRIPT_JSON = AGENT_DIR / "script.json"
 INSTRUCTIONS_MD = AGENT_DIR / "instructions.md"
+YAML_PATH = AGENT_DIR / "videosdk.yaml"
+IMAGE_TAG_RE = re.compile(
+    r"^(?P<indent>\s*image:\s*)(?P<repo>[^\s#]+):v(?P<num>\d+)\s*$",
+    re.MULTILINE,
+)
 HOST = os.getenv("SCRIPT_API_HOST", "127.0.0.1")
 PORT = int(os.getenv("SCRIPT_API_PORT", "8787"))
 
@@ -86,13 +92,42 @@ def save_script(payload: dict) -> dict:
     return script
 
 
+def _yaml_image() -> str | None:
+    if not YAML_PATH.exists():
+        return None
+    match = IMAGE_TAG_RE.search(YAML_PATH.read_text(encoding="utf-8"))
+    if not match:
+        return None
+    return f"{match.group('repo')}:v{match.group('num')}"
+
+
+def bump_image_tag() -> str:
+    if not YAML_PATH.exists():
+        raise FileNotFoundError(f"Missing {YAML_PATH.name}")
+    text = YAML_PATH.read_text(encoding="utf-8")
+    match = IMAGE_TAG_RE.search(text)
+    if not match:
+        raise ValueError("videosdk.yaml has no image tag like :v19")
+    new_num = int(match.group("num")) + 1
+    new_image = f"{match.group('repo')}:v{new_num}"
+    new_text, count = IMAGE_TAG_RE.subn(
+        lambda m: f"{m.group('indent')}{m.group('repo')}:v{int(m.group('num')) + 1}",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise ValueError("Could not bump image tag in videosdk.yaml")
+    YAML_PATH.write_text(new_text, encoding="utf-8")
+    return new_image
+
+
 def deploy_snapshot() -> dict:
     with _lock:
         return {
             "status": _deploy["status"],
             "log": list(_deploy["log"]),
             "error": _deploy["error"],
-            "image": _deploy["image"],
+            "image": _deploy["image"] or _yaml_image(),
         }
 
 
@@ -152,6 +187,18 @@ def start_push() -> bool:
 
 
 def _run_push() -> None:
+    try:
+        image = bump_image_tag()
+        _append_log(f"Bumped videosdk.yaml image to {image}")
+        with _lock:
+            _deploy["image"] = image
+    except Exception as exc:
+        with _lock:
+            _deploy["status"] = "error"
+            _deploy["error"] = str(exc)
+            _deploy["log"].append(f"Failed to bump image tag: {exc}")
+        return
+
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     try:

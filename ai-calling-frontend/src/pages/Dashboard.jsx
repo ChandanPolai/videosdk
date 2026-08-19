@@ -30,12 +30,15 @@ const FAIL_STATUSES = new Set([
 ]);
 const LIVE_STATUSES = new Set(['ringing', 'initiated', 'incoming', 'verified', 'trying', 'in-progress', 'in_progress']);
 
-const todayRange = () => {
+const startOfToday = () => {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const end = new Date();
-  end.setHours(23, 59, 59, 999);
-  return { startDate: start.getTime(), endDate: end.getTime() };
+  return start.getTime();
+};
+
+const isToday = (value) => {
+  const ts = new Date(value).getTime();
+  return Number.isFinite(ts) && ts >= startOfToday();
 };
 
 const classifyCall = (call) => {
@@ -105,17 +108,18 @@ const DashboardPage = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const range = todayRange();
-      const [todayRes, allRes, recentRes] = await Promise.all([
-        fetchAllPages(range),
-        fetchSipCalls({ page: 1, perPage: 1 }),
-        fetchSipCalls({ page: 1, perPage: 12 })
+      const [listRes, allRes] = await Promise.all([
+        fetchAllPages({}),
+        fetchSipCalls({ page: 1, perPage: 1 })
       ]);
 
-      setTodayCalls(todayRes.calls);
-      setTodayTotal(todayRes.total);
-      setAllTimeTotal(Number(allRes.pageInfo?.total || 0));
-      setRecentCalls(Array.isArray(recentRes.data) ? recentRes.data : []);
+      const calls = listRes.calls || [];
+      const todays = calls.filter((call) => isToday(call.start || call.createdAt || call.end));
+
+      setTodayCalls(todays);
+      setTodayTotal(todays.length);
+      setAllTimeTotal(Number(allRes.pageInfo?.total || listRes.total || calls.length));
+      setRecentCalls(calls.slice(0, 12));
       setUpdatedAt(new Date());
     } catch (err) {
       toast.error(err.message || 'Failed to load dashboard');

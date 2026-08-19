@@ -207,7 +207,10 @@ const AgentScriptPage = () => {
           </form>
         </Card>
 
-        <Card title="VideoSDK push" subtitle="uv run videosdk agent up">
+        <Card
+          title="VideoSDK push"
+          subtitle="Save & Push bumps videosdk.yaml (v19 → v20) then runs videosdk agent up"
+        >
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
               Status:{' '}

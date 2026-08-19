@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { RefreshCw, Play, ExternalLink, Clapperboard, Search } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { fetchMergedParticipantRecordings, fetchRooms, fetchSessions } from '../services/videosdkApi';
+import {
+  fetchMergedParticipantRecordings,
+  fetchRooms,
+  fetchSessions,
+  fetchSipCalls
+} from '../services/videosdkApi';
 import { formatDateTime, formatDuration } from '../utils/formatDate';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -45,6 +50,97 @@ const readList = (res) => {
   if (Array.isArray(res?.recordings)) return res.recordings;
   if (Array.isArray(res?.data)) return res.data;
   return [];
+};
+
+const looksLikePhone = (value) => /^\+?\d{8,15}$/.test(String(value || '').replace(/[\s-()]/g, ''));
+
+const pickPhone = (...values) => {
+  for (const value of values) {
+    if (!value) continue;
+    const text = String(value).trim();
+    if (looksLikePhone(text)) return text;
+  }
+  return '';
+};
+
+const numbersFromCall = (call) => ({
+  from: pickPhone(call?.from, call?.sipCallFrom),
+  to: pickPhone(call?.to, call?.sipCallTo)
+});
+
+const numbersFromRecording = (rec) => {
+  const channelIds = [...(rec.channel1 || []), ...(rec.channel2 || [])].map(
+    (item) => item?.participantId || item?.name
+  );
+  return {
+    from: pickPhone(rec.from, rec.sipCallFrom, rec.callerId, rec.callerNumber),
+    to: pickPhone(rec.to, rec.sipCallTo, rec.phone, rec.phoneNumber, rec.participantName, rec.participantId, ...channelIds)
+  };
+};
+
+const dateToStartMs = (value) => (value ? new Date(`${value}T00:00:00`).getTime() : undefined);
+const dateToEndMs = (value) => (value ? new Date(`${value}T23:59:59.999`).getTime() : undefined);
+
+const indexCalls = (calls = []) => {
+  const bySession = new Map();
+  const byRoom = new Map();
+  calls.forEach((call) => {
+    if (call?.sessionId && !bySession.has(call.sessionId)) bySession.set(call.sessionId, call);
+    if (call?.roomId && !byRoom.has(call.roomId)) byRoom.set(call.roomId, call);
+  });
+  return { bySession, byRoom };
+};
+
+const attachPhoneNumbers = async (recordings, { roomId, sessionId, startDate, endDate }) => {
+  let calls = [];
+  try {
+    const sipParams = {
+      page: 1,
+      perPage: 100,
+      roomId: roomId || undefined,
+      sessionId: sessionId || undefined
+    };
+    if (startDate) sipParams.startDate = dateToStartMs(startDate);
+    if (endDate) sipParams.endDate = dateToEndMs(endDate);
+
+    const sipRes = await fetchSipCalls(sipParams);
+    calls = Array.isArray(sipRes.data) ? sipRes.data : [];
+  } catch {
+    calls = [];
+  }
+
+  const { bySession, byRoom } = indexCalls(calls);
+  const missingSessionIds = [
+    ...new Set(
+      recordings
+        .map((rec) => rec.sessionId)
+        .filter((id) => id && !bySession.has(id))
+    )
+  ].slice(0, 20);
+
+  await Promise.all(
+    missingSessionIds.map(async (id) => {
+      try {
+        const res = await fetchSipCalls({ sessionId: id, page: 1, perPage: 5 });
+        const call = Array.isArray(res.data) ? res.data[0] : null;
+        if (call) bySession.set(id, call);
+      } catch {
+        /* ignore unmatched sessions */
+      }
+    })
+  );
+
+  return recordings.map((rec) => {
+    const call = (rec.sessionId && bySession.get(rec.sessionId)) || (rec.roomId && byRoom.get(rec.roomId)) || null;
+    const fromRec = numbersFromRecording(rec);
+    const fromCall = numbersFromCall(call);
+    return {
+      ...rec,
+      from: fromRec.from || fromCall.from || '',
+      to: fromRec.to || fromCall.to || '',
+      callType: call?.type || rec.callType || ''
+    };
+  });
 };
 
 const RecordingsPage = () => {
@@ -140,11 +236,16 @@ const RecordingsPage = () => {
         endDate: endDate || undefined
       });
 
-      const list = readList(res);
+      const list = await attachPhoneNumbers(readList(res), {
+        roomId,
+        sessionId,
+        startDate,
+        endDate
+      });
       const query = search.trim().toLowerCase();
       const filtered = query
         ? list.filter((rec) =>
-            [rec.id, rec.sessionId, rec.roomId, rec.status, rec.file?.fileUrl]
+            [rec.id, rec.sessionId, rec.roomId, rec.status, rec.from, rec.to, rec.file?.fileUrl]
               .filter(Boolean)
               .some((value) => String(value).toLowerCase().includes(query))
           )
@@ -261,7 +362,7 @@ const RecordingsPage = () => {
                 className="custom-input text-sm font-semibold !pl-10"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Room, session, or recording ID"
+                placeholder="Phone, room, session, or recording ID"
               />
             </div>
           </div>
@@ -317,7 +418,7 @@ const RecordingsPage = () => {
           <table className="w-full min-w-[1040px] text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200">
-                {['Recording', 'Status', 'Room', 'Session', 'Duration', 'Size', 'Start', 'Type', ''].map((h) => (
+                {['Phone', 'From', 'Status', 'Room', 'Session', 'Duration', 'Size', 'Start', 'Type', ''].map((h) => (
                   <th
                     key={h || 'actions'}
                     className="px-3 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap"
@@ -330,13 +431,13 @@ const RecordingsPage = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-16 text-center text-slate-400">
+                  <td colSpan={10} className="px-3 py-16 text-center text-slate-400">
                     Loading recordings…
                   </td>
                 </tr>
               ) : recordings.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-16 text-center">
+                  <td colSpan={10} className="px-3 py-16 text-center">
                     <div className="w-12 h-12 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center mx-auto mb-3">
                       <Clapperboard className="w-6 h-6" />
                     </div>
@@ -359,12 +460,15 @@ const RecordingsPage = () => {
                       className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors"
                     >
                       <td className="px-3 py-3.5">
-                        <p className="text-sm font-semibold text-slate-800 font-mono">{shortId(rec.id)}</p>
-                        {rec.id && (
-                          <p className="text-xs font-mono text-slate-400 mt-0.5 max-w-[220px] truncate" title={rec.id}>
-                            {rec.id}
-                          </p>
+                        <p className="text-sm font-semibold text-slate-800 whitespace-nowrap">
+                          {rec.to || rec.from || '—'}
+                        </p>
+                        {rec.callType && (
+                          <p className="text-[11px] text-slate-400 mt-0.5 capitalize">{rec.callType}</p>
                         )}
+                      </td>
+                      <td className="px-3 py-3.5 text-sm font-medium text-slate-700 whitespace-nowrap">
+                        {rec.from || '—'}
                       </td>
                       <td className="px-3 py-3.5">
                         <Badge variant={statusVariant(rec.status)}>{rec.status || 'merge'}</Badge>
@@ -431,14 +535,12 @@ const RecordingsPage = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Recording ID</p>
-                <p className="text-sm font-mono text-slate-800 mt-1 break-all">{playback.id || '—'}</p>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Phone</p>
+                <p className="text-sm font-semibold text-slate-800 mt-1">{playback.to || playback.from || '—'}</p>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Status</p>
-                <div className="mt-1">
-                  <Badge variant={statusVariant(playback.status)}>{playback.status || 'merge'}</Badge>
-                </div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">From</p>
+                <p className="text-sm font-semibold text-slate-800 mt-1">{playback.from || '—'}</p>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Room</p>

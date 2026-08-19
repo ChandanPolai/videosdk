@@ -19,5 +19,16 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/agent-api/, '')
       }
     }
+  },
+  preview: {
+    port: 3002,
+    proxy: {
+      '/videosdk-api': {
+        target: 'https://api.videosdk.live',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/videosdk-api/, '')
+      }
+    }
   }
 });
