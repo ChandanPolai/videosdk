@@ -3,12 +3,12 @@ agent:
   name: raaj-investment-priya
 build:
   file: Dockerfile
-  image: vcr.videosdk.live/6a51d08bc4926dec4f7d5549/raaj-investment-priya:v13
+  image: vcr.videosdk.live/6a51d08bc4926dec4f7d5549/raaj-investment-priya:v19
   logs:
     enabled: true
 deploy:
   id: dep_05scoe
-  version: v_y2ahwm
+  version: v_pp9cbt
   replicas:
     min: 0
     max: 5

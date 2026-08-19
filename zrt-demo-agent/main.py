@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 
 import zeroruntime
-from zeroruntime import Agent, AgentContext, EOUConfig, Pipeline, Room, function_tool
-from zeroruntime.inference import TurnDetector, GoogleLLM, DeepgramSTT, CartesiaTTS
+from zeroruntime import Agent, AgentContext, EOUConfig, Pipeline, Room, function_tool, InterruptConfig
+from zeroruntime.inference import TurnDetector, GoogleLLM, DeepgramSTT, CartesiaTTS, AICousticsDenoise
 from zeroruntime.plugins import SileroVAD
 from dotenv import load_dotenv
 
@@ -66,13 +66,21 @@ def build_pipeline() -> Pipeline:
             voice="28ca2041-5dda-42df-8123-f58ea9c3da00",
         ),
         turn_detector=TurnDetector(),
-        vad=SileroVAD(
-            min_silence_duration=0.8,
+       vad=SileroVAD(
+            min_silence_duration=0.45,
             min_speech_duration=0.05,
-            min_volume=0.01,
-            energy_filter_enabled=True,
         ),
-        eou=EOUConfig(mode="DEFAULT", min_max_speech_wait_timeout=[0.0, 0.0]),
+        eou=EOUConfig(
+            mode="DEFAULT",
+            min_max_speech_wait_timeout=[0.0, 0.0],
+            eou_certainty_threshold=0.8,
+        ),
+        interrupt=InterruptConfig(
+            mode="HYBRID",
+            interrupt_min_duration=0.2,
+            interrupt_min_words=2,
+        ),
+        denoise=AICousticsDenoise(model_id="quail-vf-2.2-l-16khz"),
      )
 
 
