@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { RefreshCw, ChevronLeft, ChevronRight, Users, Eye, Clapperboard } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { fetchSessions, fetchSessionById, fetchRooms } from '../services/videosdkApi';
@@ -22,7 +23,15 @@ const shortId = (id = '') => {
   return `${id.slice(0, 8)}…${id.slice(-4)}`;
 };
 
-const SessionsPage = ({ onOpenRecordings }) => {
+const SessionsPage = () => {
+  const navigate = useNavigate();
+  const openRecordings = (session) => {
+    const params = new URLSearchParams();
+    if (session?.roomId) params.set('roomId', session.roomId);
+    if (session?.id) params.set('sessionId', session.id);
+    navigate(`/recordings?${params.toString()}`);
+  };
+
   const [rooms, setRooms] = useState([]);
   const [roomsLoading, setRoomsLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
@@ -224,12 +233,7 @@ const SessionsPage = ({ onOpenRecordings }) => {
                           size="sm"
                           variant="secondary"
                           icon={Clapperboard}
-                          onClick={() =>
-                            onOpenRecordings?.({
-                              roomId: session.roomId,
-                              sessionId: session.id
-                            })
-                          }
+                          onClick={() => openRecordings(session)}
                         >
                           Recordings
                         </Button>
@@ -321,10 +325,7 @@ const SessionsPage = ({ onOpenRecordings }) => {
               variant="secondary"
               icon={Clapperboard}
               onClick={() => {
-                onOpenRecordings?.({
-                  roomId: sessionDetail.roomId,
-                  sessionId: sessionDetail.id
-                });
+                openRecordings(sessionDetail);
                 setDetailOpen(false);
               }}
             >

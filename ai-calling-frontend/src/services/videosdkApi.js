@@ -118,3 +118,10 @@ export const fetchTrackRecordings = (params = {}) =>
     perPage: 10,
     ...params
   });
+
+export const fetchMergedParticipantRecordings = (params = {}) =>
+  apiGet('/v2/recordings/participant/merge', {
+    page: 1,
+    perPage: 10,
+    ...params
+  });

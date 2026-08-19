@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Activity,
   CheckCircle2,
@@ -92,7 +93,8 @@ const StatCard = ({ label, value, hint, icon: Icon, tone = 'brand' }) => {
   );
 };
 
-const DashboardPage = ({ onOpenCalls }) => {
+const DashboardPage = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [todayCalls, setTodayCalls] = useState([]);
   const [todayTotal, setTodayTotal] = useState(0);
@@ -163,7 +165,7 @@ const DashboardPage = ({ onOpenCalls }) => {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={onOpenCalls}>
+          <Button size="sm" variant="ghost" onClick={() => navigate('/calls')}>
             View call history
           </Button>
           <Button size="sm" variant="secondary" icon={RefreshCw} onClick={load} disabled={loading}>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { NavLink } from 'react-router-dom';
 import Logo from '../ui/Logo';
 import {
   LayoutDashboard,
@@ -14,16 +15,16 @@ import {
 } from 'lucide-react';
 
 export const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'test-call', label: 'Test Call', icon: PhoneCall },
-  { id: 'agent-script', label: 'Agent Script', icon: ScrollText },
-  { id: 'calls', label: 'Call History', icon: Phone },
-  { id: 'rooms', label: 'Rooms', icon: DoorOpen },
-  { id: 'sessions', label: 'Sessions', icon: History },
-  { id: 'recordings', label: 'Recordings', icon: Clapperboard }
+  { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'test-call', path: '/test-call', label: 'Test Call', icon: PhoneCall },
+  { id: 'agent-script', path: '/agent-script', label: 'Agent Script', icon: ScrollText },
+  { id: 'calls', path: '/calls', label: 'Call History', icon: Phone },
+  { id: 'rooms', path: '/rooms', label: 'Rooms', icon: DoorOpen },
+  { id: 'sessions', path: '/sessions', label: 'Sessions', icon: History },
+  { id: 'recordings', path: '/recordings', label: 'Recordings', icon: Clapperboard }
 ];
 
-export const Sidebar = ({ activeTab, setActiveTab, isOpen, setIsOpen, isCollapsed, onToggleCollapse }) => (
+export const Sidebar = ({ isOpen, setIsOpen, isCollapsed, onToggleCollapse }) => (
   <>
     {isOpen && (
       <div
@@ -61,31 +62,23 @@ export const Sidebar = ({ activeTab, setActiveTab, isOpen, setIsOpen, isCollapse
       <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const active = activeTab === item.id;
           return (
-            <button
+            <NavLink
               key={item.id}
-              disabled={item.disabled}
-              onClick={() => {
-                if (item.disabled) return;
-                setActiveTab(item.id);
-                setIsOpen(false);
-              }}
-              className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
-                active
-                  ? 'bg-brand-500 text-white shadow-md shadow-brand-500/25'
-                  : item.disabled
-                    ? 'text-slate-300 cursor-not-allowed'
+              to={item.path}
+              onClick={() => setIsOpen(false)}
+              className={({ isActive }) =>
+                `w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
+                  isActive
+                    ? 'bg-brand-500 text-white shadow-md shadow-brand-500/25'
                     : 'text-slate-600 hover:bg-brand-50 hover:text-brand-700'
-              } ${isCollapsed ? 'lg:justify-center' : ''}`}
-              title={item.disabled ? 'Coming soon' : item.label}
+                } ${isCollapsed ? 'lg:justify-center' : ''}`
+              }
+              title={item.label}
             >
               <Icon className="w-5 h-5 shrink-0" />
               <span className={`${isCollapsed ? 'lg:hidden' : ''} truncate`}>{item.label}</span>
-              {item.disabled && !isCollapsed && (
-                <span className="ml-auto text-[10px] font-bold uppercase tracking-wide opacity-70">Soon</span>
-              )}
-            </button>
+            </NavLink>
           );
         })}
       </nav>
