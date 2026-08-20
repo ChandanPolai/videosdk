@@ -17,6 +17,7 @@ load_dotenv(override=True)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 AGENT_ID = os.getenv("AGENT_ID", "ag_zzq3b1")
+CALL_TRANSFER_TO = os.getenv("CALL_TRANSFER_TO", "")
 SCRIPT_PATH = Path(__file__).with_name("script.json")
 DEFAULT_OPENING = "Hello, kya main {name} ji se baat kar rahi hoon?"
 
@@ -137,6 +138,56 @@ class VoiceAgent(Agent):
         handle = await self.session.say(message, interruptible=False)
         await handle
         await self.hangup()
+
+    @function_tool
+    async def transfer_call(self, message: str) -> dict:
+        """Live-transfer the caller to a human advisor right now.
+
+        Only use this after the caller has agreed to be connected immediately
+        (not a callback later). If they instead want a callback, use
+        request_advisor_callback.
+
+        message: A short, warm heads-up line spoken before transferring, e.g.
+            "Sure, main abhi aapko humare advisor se connect kar rahi hoon, ek second."
+        """
+        if not CALL_TRANSFER_TO:
+            return {"status": "unavailable", "reason": "CALL_TRANSFER_TO is not configured"}
+        asyncio.create_task(self._announce_and_transfer(message))
+        return {"status": "transferring"}
+
+    async def _announce_and_transfer(self, message: str) -> None:
+        if not self.session:
+            return
+        await self.session.interrupt()
+        await asyncio.sleep(0.5)  # let the interrupt land before the heads-up
+        handle = await self.session.say(message, interruptible=False)
+        await handle
+        try:
+            result = await self.session.transfer_call(CALL_TRANSFER_TO)
+            logging.info("Transferred call to %s: %s", CALL_TRANSFER_TO, result)
+        except Exception:
+            logging.exception("transfer_call to %s failed", CALL_TRANSFER_TO)
+            await self.session.say(
+                "Maaf kijiye, transfer abhi possible nahi ho paaya. "
+                "Main aapki advisor callback request note kar leta/leti hoon.",
+                interruptible=False,
+            )
+
+    @function_tool
+    async def request_advisor_callback(self, query_type: str, preferred_time: str = "") -> dict:
+        """Log an advisor callback request for later, instead of a live transfer.
+
+        Use this when the caller wants a callback rather than being connected
+        right now, or when a live transfer isn't available/accepted.
+
+        query_type: One of GMP, Valuation, Portfolio, Listing Gain, Other.
+        preferred_time: Caller's preferred callback time, if given.
+        """
+        logging.info(
+            "Advisor callback requested (query_type=%s, preferred_time=%s, customer=%s)",
+            query_type, preferred_time, self.customer_info.get("name"),
+        )
+        return {"status": "logged", "query_type": query_type, "preferred_time": preferred_time}
 
 
 if __name__ == "__main__":

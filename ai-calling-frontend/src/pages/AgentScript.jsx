@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CloudUpload, RefreshCw, Save } from 'lucide-react';
+import { CloudUpload, Phone, RefreshCw, Save } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { fetchAgentScript, fetchDeployStatus, saveAgentScript } from '../services/agentScriptApi';
 import Card from '../components/ui/Card';
@@ -9,7 +9,8 @@ const emptyScript = {
   agent_name: 'Priya',
   company: 'Raaj Investment',
   opening_line: '',
-  instructions: ''
+  instructions: '',
+  call_transfer_to: ''
 };
 
 const AgentScriptPage = () => {
@@ -31,7 +32,8 @@ const AgentScriptPage = () => {
         agent_name: data.agent_name || 'Priya',
         company: data.company || 'Raaj Investment',
         opening_line: data.opening_line || '',
-        instructions: data.instructions || ''
+        instructions: data.instructions || '',
+        call_transfer_to: data.call_transfer_to || ''
       });
       if (status) {
         setDeploy(status);
@@ -87,7 +89,8 @@ const AgentScriptPage = () => {
         agent_name: saved.agent_name,
         company: saved.company,
         opening_line: saved.opening_line,
-        instructions: saved.instructions
+        instructions: saved.instructions,
+        call_transfer_to: saved.call_transfer_to || ''
       });
       if (push) {
         setDeploy(saved.deploy || { status: 'running', log: [] });
@@ -174,6 +177,26 @@ const AgentScriptPage = () => {
               />
               <p className="text-xs text-slate-400 mt-1.5">
                 Use <span className="font-semibold">{`{name}`}</span> — it is replaced with the participant name from the test call.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                Call transfer number
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <input
+                  className="custom-input text-sm font-semibold !pl-10"
+                  value={script.call_transfer_to}
+                  disabled={loading}
+                  onChange={(e) => setScript((prev) => ({ ...prev, call_transfer_to: e.target.value }))}
+                  placeholder="+918347325704"
+                  inputMode="tel"
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-1.5">
+                E.164 format — e.g. <span className="font-semibold">+918347325704</span>. Agent transfers complex calls to this number. Saved to <span className="font-semibold">.env → CALL_TRANSFER_TO</span>.
               </p>
             </div>
 

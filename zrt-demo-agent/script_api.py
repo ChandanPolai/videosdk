@@ -22,6 +22,7 @@ AGENT_DIR = Path(__file__).resolve().parent
 SCRIPT_JSON = AGENT_DIR / "script.json"
 INSTRUCTIONS_MD = AGENT_DIR / "instructions.md"
 YAML_PATH = AGENT_DIR / "videosdk.yaml"
+ENV_PATH = AGENT_DIR / ".env"
 IMAGE_TAG_RE = re.compile(
     r"^(?P<indent>\s*image:\s*)(?P<repo>[^\s#]+):v(?P<num>\d+)\s*$",
     re.MULTILINE,
@@ -34,6 +35,7 @@ DEFAULT_SCRIPT = {
     "company": "Raaj Investment",
     "opening_line": "Hello, kya main {name} ji se baat kar rahi hoon?",
     "instructions": "",
+    "call_transfer_to": "",
 }
 
 _lock = threading.Lock()
@@ -55,16 +57,55 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
+def _read_env_value(key: str) -> str:
+    """Read a single key from the .env file without loading into os.environ."""
+    if not ENV_PATH.exists():
+        return ""
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        if k.strip() == key:
+            return v.strip().strip('"').strip("'")
+    return ""
+
+
+def _write_env_value(key: str, value: str) -> None:
+    """Update or append a key in the .env file."""
+    content = ENV_PATH.read_text(encoding="utf-8") if ENV_PATH.exists() else ""
+    lines = content.splitlines(keepends=True)
+    updated = False
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("#") and "=" in stripped:
+            k, _, _ = stripped.partition("=")
+            if k.strip() == key:
+                new_lines.append(f"{key}={value}\n")
+                updated = True
+                continue
+        new_lines.append(line)
+    if not updated:
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        new_lines.append(f"{key}={value}\n")
+    ENV_PATH.write_text("".join(new_lines), encoding="utf-8")
+
+
 def load_script() -> dict:
     stored = _read_json(SCRIPT_JSON)
     instructions = stored.get("instructions") or ""
     if not instructions and INSTRUCTIONS_MD.exists():
         instructions = INSTRUCTIONS_MD.read_text(encoding="utf-8")
+    # call_transfer_to: prefer .env as source of truth, fall back to script.json cache
+    call_transfer_to = _read_env_value("CALL_TRANSFER_TO") or str(stored.get("call_transfer_to") or "").strip()
     return {
         "agent_name": (stored.get("agent_name") or DEFAULT_SCRIPT["agent_name"]).strip(),
         "company": (stored.get("company") or DEFAULT_SCRIPT["company"]).strip(),
         "opening_line": (stored.get("opening_line") or DEFAULT_SCRIPT["opening_line"]).strip(),
         "instructions": instructions,
+        "call_transfer_to": call_transfer_to,
     }
 
 
@@ -74,6 +115,7 @@ def save_script(payload: dict) -> dict:
         "company": str(payload.get("company") or DEFAULT_SCRIPT["company"]).strip() or "Raaj Investment",
         "opening_line": str(payload.get("opening_line") or "").strip(),
         "instructions": str(payload.get("instructions") or "").strip(),
+        "call_transfer_to": str(payload.get("call_transfer_to") or "").strip(),
     }
     SCRIPT_JSON.write_text(
         json.dumps(
@@ -81,6 +123,7 @@ def save_script(payload: dict) -> dict:
                 "agent_name": script["agent_name"],
                 "company": script["company"],
                 "opening_line": script["opening_line"],
+                "call_transfer_to": script["call_transfer_to"],
             },
             indent=2,
             ensure_ascii=False,
@@ -89,6 +132,7 @@ def save_script(payload: dict) -> dict:
         encoding="utf-8",
     )
     INSTRUCTIONS_MD.write_text(script["instructions"].rstrip() + "\n", encoding="utf-8")
+    _write_env_value("CALL_TRANSFER_TO", script["call_transfer_to"])
     return script
 
 
