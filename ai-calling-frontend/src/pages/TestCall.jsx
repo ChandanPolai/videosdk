@@ -6,6 +6,7 @@ import {
   fetchSipPhoneNumbers,
   fetchSipRoutingRules
 } from '../services/videosdkApi';
+import { fetchAgentScript } from '../services/agentScriptApi';
 import { COUNTRY_CODES, buildE164, getDialCode } from '../utils/countryCodes';
 import { parseSpreadsheetFile } from '../utils/parseSpreadsheet';
 import Card from '../components/ui/Card';
@@ -37,6 +38,7 @@ const TestCallPage = () => {
 
   const [sipCallFrom, setSipCallFrom] = useState('');
   const [routingRuleId, setRoutingRuleId] = useState('');
+  const [callForwardNo, setCallForwardNo] = useState('');
   const [countryCode, setCountryCode] = useState('IN');
   const [localNumber, setLocalNumber] = useState('');
   const [participantName, setParticipantName] = useState('');
@@ -96,12 +98,20 @@ const TestCallPage = () => {
     return items;
   }, [spreadsheet, phoneColumn, nameColumn, countryCode]);
 
+  const buildCallMetadata = (name) => {
+    const metadata = { name: String(name || '').trim() || 'Customer' };
+    const forward = normalizePhone(callForwardNo);
+    if (forward) metadata.call_forward_no = forward;
+    return metadata;
+  };
+
   const loadSetup = async () => {
     setLoadingSetup(true);
     try {
-      const [numbersRes, rulesRes] = await Promise.all([
+      const [numbersRes, rulesRes, scriptRes] = await Promise.all([
         fetchSipPhoneNumbers({ page: 1, perPage: 50 }),
-        fetchSipRoutingRules({ page: 1, perPage: 50 })
+        fetchSipRoutingRules({ page: 1, perPage: 50 }),
+        fetchAgentScript().catch(() => null)
       ]);
 
       const numbers = Array.isArray(numbersRes.data) ? numbersRes.data : [];
@@ -118,6 +128,10 @@ const TestCallPage = () => {
 
       setSipCallFrom((prev) => prev || preferredFrom?.phoneNumber?.e164 || firstActive?.phoneNumber?.e164 || '');
       setRoutingRuleId((prev) => prev || preferredRule?.id || firstOutboundRule?.id || '');
+      const scriptForward = normalizePhone(scriptRes?.call_transfer_to || '');
+      if (scriptForward) {
+        setCallForwardNo((prev) => prev || scriptForward);
+      }
     } catch (err) {
       toast.error(err.message || 'Failed to load call setup');
     } finally {
@@ -192,7 +206,7 @@ const TestCallPage = () => {
           sipCallFrom: from,
           sipCallTo: item.e164,
           routingRuleId,
-          metadata: { name: item.name }
+          metadata: buildCallMetadata(item.name)
         });
         successCount += 1;
         lastSuccess = { ...res, participantName: item.name };
@@ -324,9 +338,13 @@ const TestCallPage = () => {
         sipCallFrom: normalizePhone(sipCallFrom),
         sipCallTo: to,
         routingRuleId,
-        metadata: { name: customerName }
+        metadata: buildCallMetadata(customerName)
       });
-      setLastResult({ ...res, participantName: customerName });
+      setLastResult({
+        ...res,
+        participantName: customerName,
+        callForwardNo: normalizePhone(callForwardNo) || null
+      });
       toast.success(res.message || `Call started for ${customerName}`);
     } catch (err) {
       toast.error(err.message || 'Failed to place test call');
@@ -414,6 +432,24 @@ const TestCallPage = () => {
                   value={selectedRule?.dispatch?.agent?.id || '—'}
                   readOnly
                 />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                  Call Forward Number
+                </label>
+                <input
+                  className="custom-input text-sm font-semibold"
+                  value={callForwardNo}
+                  disabled={loadingSetup}
+                  onChange={(e) => setCallForwardNo(e.target.value)}
+                  placeholder="+917069472565"
+                  inputMode="tel"
+                />
+                <p className="text-xs text-slate-400 mt-1.5">
+                  Sent as <span className="font-semibold">call_forward_no</span> in call metadata. Edit anytime —
+                  defaults from Agent Script transfer number.
+                </p>
               </div>
 
               {entryMode === 'single' && (
@@ -708,6 +744,12 @@ const TestCallPage = () => {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-slate-500">Name</span>
                     <span className="text-xs font-semibold text-slate-800">{lastResult.participantName || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-slate-500">Call forward</span>
+                    <span className="text-xs font-semibold text-slate-800">
+                      {lastResult.callForwardNo || '—'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-slate-500">Call ID</span>

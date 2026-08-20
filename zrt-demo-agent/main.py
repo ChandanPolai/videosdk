@@ -93,6 +93,7 @@ class VoiceAgent(Agent):
         instructions = (INSTRUCTIONS or "").replace("[Client Name]", customer_name)
         agent_name = (script.get("agent_name") or "Priya").strip()
         company = (script.get("company") or "Raaj Investment").strip()
+        self.transfer_phonenumber = (meta.get("call_forward_no") or CALL_TRANSFER_TO or "").strip()
         instructions = (
             f"Your name is {agent_name} from {company}. "
             f"The person you are calling is {customer_name}. Always address them as {customer_name} ji.\n\n"
@@ -141,16 +142,23 @@ class VoiceAgent(Agent):
 
     @function_tool
     async def transfer_call(self, message: str) -> dict:
-        """Live-transfer the caller to a human advisor right now.
+        """Live-transfer the caller to a human advisor RIGHT NOW. Call this tool
+        immediately (do not keep chatting) in ANY of these cases:
 
-        Only use this after the caller has agreed to be connected immediately
-        (not a callback later). If they instead want a callback, use
-        request_advisor_callback.
+        1. Caller wants a human / not the AI — e.g. advisor, office, customer
+           care, "original person", "kisi se baat karao", "human se connect karo",
+           "AI nahi", "operator", "representative", or similar intent in any language.
+        2. Caller confirms interest to apply / purchase / book IPO lots now, or
+           agrees at the final confirmation step of the application lead flow.
+        3. Caller clearly asks to be connected live to someone right now.
 
-        message: A short, warm heads-up line spoken before transferring, e.g.
+        Do NOT wait for the exact words "call forward" or "transfer". Intent is enough.
+        Prefer live transfer over callback whenever they want to talk to a person now.
+
+        message: Short heads-up spoken before transfer, e.g.
             "Sure, main abhi aapko humare advisor se connect kar rahi hoon, ek second."
         """
-        if not CALL_TRANSFER_TO:
+        if not self.transfer_phonenumber:
             return {"status": "unavailable", "reason": "CALL_TRANSFER_TO is not configured"}
         asyncio.create_task(self._announce_and_transfer(message))
         return {"status": "transferring"}
@@ -163,10 +171,10 @@ class VoiceAgent(Agent):
         handle = await self.session.say(message, interruptible=False)
         await handle
         try:
-            result = await self.session.transfer_call(CALL_TRANSFER_TO)
-            logging.info("Transferred call to %s: %s", CALL_TRANSFER_TO, result)
+            result = await self.session.transfer_call(self.transfer_phonenumber)
+            logging.info("Transferred call to %s: %s", self.transfer_phonenumber, result)
         except Exception:
-            logging.exception("transfer_call to %s failed", CALL_TRANSFER_TO)
+            logging.exception("transfer_call to %s failed", self.transfer_phonenumber)
             await self.session.say(
                 "Maaf kijiye, transfer abhi possible nahi ho paaya. "
                 "Main aapki advisor callback request note kar leta/leti hoon.",
