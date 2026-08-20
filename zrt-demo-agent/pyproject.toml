@@ -9,4 +9,5 @@ dependencies = [
   "python-dotenv",
   "mcp<2.0.0",
   "httpx",
+  "videosdk-cli",
 ]
