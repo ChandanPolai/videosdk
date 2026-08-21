@@ -526,6 +526,7 @@ const RecordingsPage = () => {
           lastPage={lastPage}
           total={pageInfo.total || 0}
           loading={loading}
+          itemLabel="recordings"
           onPageChange={(nextPage) => updateParams({ page: nextPage })}
         />
       </Card>

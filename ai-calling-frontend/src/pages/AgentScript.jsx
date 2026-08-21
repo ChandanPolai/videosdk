@@ -191,12 +191,12 @@ const AgentScriptPage = () => {
                   value={script.call_transfer_to}
                   disabled={loading}
                   onChange={(e) => setScript((prev) => ({ ...prev, call_transfer_to: e.target.value }))}
-                  placeholder="+918347325704"
+                  placeholder="+14155550199"
                   inputMode="tel"
                 />
               </div>
               <p className="text-xs text-slate-400 mt-1.5">
-                E.164 format — e.g. <span className="font-semibold">+918347325704</span>. Agent transfers complex calls to this number. Saved to <span className="font-semibold">.env → CALL_TRANSFER_TO</span>.
+                E.164 format — e.g. <span className="font-semibold">+14155550199</span>. Agent transfers complex calls to this number. Saved to <span className="font-semibold">.env → CALL_TRANSFER_TO</span>.
               </p>
             </div>
 

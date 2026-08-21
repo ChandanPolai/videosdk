@@ -443,7 +443,7 @@ const TestCallPage = () => {
                   value={callForwardNo}
                   disabled={loadingSetup}
                   onChange={(e) => setCallForwardNo(e.target.value)}
-                  placeholder="+917069472565"
+                  placeholder="+14155550199"
                   inputMode="tel"
                 />
                 <p className="text-xs text-slate-400 mt-1.5">
@@ -461,7 +461,7 @@ const TestCallPage = () => {
                     className="custom-input text-sm"
                     value={participantName}
                     onChange={(e) => setParticipantName(e.target.value)}
-                    placeholder="Indu"
+                    placeholder="Alex Rivera"
                     required={entryMode === 'single'}
                   />
                 </div>
@@ -515,7 +515,7 @@ const TestCallPage = () => {
                         className="custom-input text-sm font-semibold !pl-14"
                         value={localNumber}
                         onChange={(e) => setLocalNumber(e.target.value.replace(/[^\d\s-]/g, ''))}
-                        placeholder="9535051051"
+                        placeholder="5550147829"
                         inputMode="tel"
                         required={entryMode === 'single'}
                       />
